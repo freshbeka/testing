@@ -55,3 +55,37 @@ dat_flow <- dat_flow[,c("year","month","flow")]
 
 ## inspect the file
 head(dat_flow)
+
+
+library(googlesheets4)
+
+## authorize for reading public-only sheets
+gs4_deauth()
+
+## specify URL
+gs_url <- "https://docs.google.com/spreadsheets/d/1ct3MMMzEX82BeqJcUw3uYD5b4CJrKUmRYCK-wVA3yig/edit#gid=0"
+
+
+## read from URL
+read_sheet(gs_url)
+
+## assign it to an object
+gs_raw <- read_sheet(gs_url)
+
+## specify ID
+gs_id <- as_sheets_id(gs_url)
+
+## read from ID
+read_sheet(gs_id)
+
+## assign it to an object
+gs_raw <- read_sheet(gs_id)
+
+## load the pckage
+library(jsonlite)
+
+## set the URL
+github_url = "https://api.github.com/users/mdscheuerell/repos"
+
+## get the JSON data
+data_json <- fromJSON(github_url)
