@@ -1,4 +1,12 @@
+
+##Quote marks pasted from Zoom chat:
 knitr::purl(“lec_10_getting_data.Rmd”)
+
+##Quote marks deleted, and re-typed:
+knitr::purl("lec_10_getting_data.Rmd")
+
+
+library(here)
 
 ## first & last years of flow data
 yr_frst <- 2001
@@ -85,7 +93,21 @@ gs_raw <- read_sheet(gs_id)
 library(jsonlite)
 
 ## set the URL
-github_url = "https://api.github.com/users/mdscheuerell/repos"
+github_url = "https://api.github.com/users/freshbeka/repos"
 
 ## get the JSON data
 data_json <- fromJSON(github_url)
+
+names(data_json)
+
+## table of the number of forks
+table(data_json$forks)
+
+## table number of the different languages
+table(data_json$language)
+
+## how many repos have open issues? 
+table(data_json$open_issues_count)
+
+
+##EGRET is a package for pulling USGS info.
