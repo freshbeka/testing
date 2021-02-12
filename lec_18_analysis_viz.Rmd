@@ -1,0 +1,519 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.align = "center", out.width = '70%')
+```
+
+<br>
+
+# Background 
+
+Analysis and reporting are a large and important part of the data science process. Communicating what you did and how you did it is critical to a reproducible workflow.
+
+***
+
+# Example analysis
+
+Here is an example of an exploratory analysis based on a re-examination of some count data on seastars obtained before and after a wasting syndrome. The original analysis was conducted and published by [Schultz (2016)](https://peerj.com/articles/1980/). Here is the abstract from their paper.
+
+> Echinoderm population collapses, driven by disease outbreaks and climatic events, may be important drivers of population dynamics, ecological shifts and biodiversity. The northeast Pacific recently experienced a mass mortality of sea stars. In Howe Sound, British Columbia, the sunflower star *Pycnopodia helianthoides*—a previously abundant predator of bottom-dwelling invertebrates—began to show signs of a wasting syndrome in early September 2013, and dense aggregations disappeared from many sites in a matter of weeks. Here, we assess changes in subtidal community composition by comparing the abundance of fish, invertebrates and macroalgae at 20 sites in Howe Sound before and after the 2013 sea star mortality to evaluate evidence for a trophic cascade. We observed changes in the abundance of several species after the sea star mortality, most notably a four-fold increase in the number of green sea urchins, *Strongylocentrotus droebachiensis*, and a significant decline in kelp cover, which are together consistent with a trophic cascade. Qualitative data on the abundance of sunflower stars and green urchins from a citizen science database show that the patterns of echinoderm abundance detected at our study sites reflected wider local trends. The trophic cascade evident at the scale of Howe Sound was observed at half of the study sites. It remains unclear whether the urchin response was triggered directly, via a reduction in urchin mortality, or indirectly, via a shift in urchin distribution into areas previously occupied by the predatory sea stars. Understanding the ecological implications of sudden and extreme population declines may further elucidate the role of echinoderms in temperate seas, and provide insight into the resilience of marine ecosystems to biological disturbances.
+
+## Main results
+
+Here is Figure 3 from Schultz et al. (2016), which shows the mean counts of organisms before and after the wasting event. They used a barplot with symmetrical errors bars based on a (in my opinion) flawed model for counts. That is, the error bars are symmetric around the means, which suggests that they might indeed observe negative counts.
+
+<br>
+```{r, echo = FALSE, fig.align = "center", out.width = "40%"}
+knitr::include_graphics("images/seastars.png")
+```
+<br>
+
+
+**Figure 3**. Mean abundance (per m2) of (A) sunflower stars and (B) green sea urchins, and (C) percent cover of kelp on rocky reefs in Howe Sound, British Columbia, on 80 transects before and after the mass mortality of sea stars in 2013. Error bars represent standard error. The dominant kelp was the sea colander kelp, *Agarum fimbriatum*.
+
+<br>
+
+## Models for count data
+
+The before/after comparison of organism densities in Schultz et al. is based upon discrete counts of individuals. Thus, we should really consider statistical distributions that reflect the true nature of the data rather than trying to transform the data and analyze it with a continuous distribution (e.g., Gaussian).
+
+### Poisson distribution
+
+The Poisson distribution is one of the most common ways to model count data because it has only one parameter to estimate (i.e., the mean are the variance are equal). If we expect, on average, $\lambda_t$ individuals m^-2^ at time $t$, and we sample a total of $A$ m^2^, then each of $i$ counts during that period ($c_{i,t}$) would reflect the following Poisson process:
+
+$$
+c_{i,t} \sim \text{Poisson}(\lambda_t A).
+$$
+
+Because the rate constant $\lambda_t$ must be greater than zero, one generally assumes a log-link whereby
+
+$$
+\log(\lambda_t) \sim \text{Normal}(\mu, \sigma^2).
+$$
+
+### Negative binomial distribution
+
+An alternatve to the Poisson is the negative binomial distribution, which has an additional parameter to account for overdispersion in the data (i.e. the mean and variance are not equal). Specifically,
+
+$$
+c_{i,t} \sim \text{NegBin}(p, r).
+$$
+
+The shape (dispersion) parameter $r$ must be greater than zero and can be modeled with a uniform distribution, such that
+
+$$
+r \sim \text{Uniform}(0, U)
+$$
+
+The probability parameter $p$ can be written in terms of $r$ and the underlying mean $\lambda_t A$, whereby
+
+$$
+p = \frac{r}{r + \lambda_t A}
+$$
+
+and $\log(\lambda_t) \sim \text{Normal}(\mu, \sigma^2)$ as with the Poisson distribution. Of note, the variance of the negative binomial distribution $\sigma^2$ can be calculated as
+
+$$
+\sigma^2 = \lambda_t A + \frac{(\lambda_t A)^2}{r},
+$$
+such that the variance converges to the mean as $r \rightarrow \infty$, and the negative binomial converges to the Poisson.
+
+#### Aside on equations
+
+The above equations are written in **LaTeX** form, which can be a bit tricky to figure out when you're first learning. There is a neat package called [equatiomatic](https://datalorax.github.io/equatiomatic/index.html), which will take the results from a fitted model in **R** and transform it into the corresponding **LaTeX** code. For example, this code fits a simple linear regression model from the `mtcars` dataset and then writes the equation.
+
+```{r equatiomatic, results = "hold"}
+library(equatiomatic)
+
+## Fit a simple linear regression model
+model_fit <- lm(mpg ~ cyl + disp, mtcars)
+
+## Give the results to extract_eq
+extract_eq(model_fit)
+
+## raw result
+## $$
+## \operatorname{mpg} = \alpha + \beta_{1}(\operatorname{cyl}) + \beta_{2}(\operatorname{disp}) + \epsilon
+## $$
+```
+
+
+## Requirements
+
+I rely on a number of packages for reading, munging, and plotting the data, which include:
+
+* [Jenny Bryan's](https://github.com/jennybc) [__readxl__](http://readxl.tidyverse.org/);
+* several from [Hadley Wickham's](https://github.com/hadley) [__tidyverse__](http://www.tidyverse.org/);
+* [Thomas Lin Pederson's](https://github.com/thomasp85) [__patchwork__](https://github.com/thomasp85/patchwork).
+
+In addition to some frequentist approaches, I also show different options for Bayesian model fitting using the following software and packages:
+
+* [__JAGS__](http://mcmc-jags.sourceforge.net/) and the [__R2jags__](https://cran.r-project.org/web/packages/R2jags/index.html) package;
+
+```{r load_pkgs, message=FALSE}
+## for reading data
+library(readxl)
+library(readr)
+## for data munging
+library(dplyr)
+library(tidyr)
+## for plotting
+library(ggplot2)
+library(patchwork)
+## for model fitting
+library(R2jags)
+```
+
+## Data
+
+Schultz et al. were very considerate in posting the data they used for the analyses and figures in their paper. Those data are available in MS Excel format from _PeerJ_'s server in a file called [Schultz_data_ver2.xlsx](https://peerj.com/articles/1980/#supp-1).
+
+### Step 1: Convert Excel workbook to csv files
+
+The [code](https://peerj.com/articles/1980/#supp-2) provided by the authors works with various data files in .csv format, so I begin by extracting those from the .xlsx file.
+
+```{r, get_author_data}
+## data directory
+data_dir <- here::here("lectures", "week_06", "data")
+## original data file
+orig_data <- file.path(data_dir, "Schultz_data_ver2.xlsx")
+## worksheets in notebook
+sht_names <- excel_sheets(orig_data)
+## convert worksheets to csv
+if(length(list.files(data_dir, "csv")) == 0) {
+  for(i in sht_names) {
+    orig_data %>% read_xlsx(sheet = i) %>%
+      write_csv(file = file.path(data_dir, i))
+  }
+}
+```
+
+### Step 2: Load count data
+
+The data arise from a series of samples before and after the seastar wasting event, with counts of various species obtained within 0.25 m^2^ quadrats at 15 locations along each of 4 transects at 20 different sites. The counts reported by the authors have been summed across all of the 15 quadrats for each transect/site combination, so the data frame has a total of (2 periods) x (4 transects) x (20 sites) = 160 rows.
+
+```{r read_count_data, message=FALSE}
+## read count data
+counts <- read_csv(file.path(data_dir, "transectcounts.csv"))
+colnames(counts)
+## split out before/after counts of sunflower stars
+## wide format
+stars_wide <- counts %>%
+  select(ssws, transect, sunflower.star) %>%
+  spread(ssws, value = sunflower.star)  %>%
+  select(-transect)
+## tidy format
+stars_tidy <- stars_wide %>%
+  gather(key = time, value = count)
+```
+
+### Step 3: Plot the data
+
+These data contain a lot of zeros, so visualization can be a bit tricky. Here are two options: a jittered dot plot (left) and violin plot (right). These are rough *exploratory* figures.
+
+```{r plot_data, fig.height=5, fig.width=8}
+## base plot
+pp <- ggplot(stars_tidy, aes(x=time, y=count, color=time))
+## jittered dotplot
+p1 <- pp + geom_jitter(shape=16, position=position_jitter(0.3)) + theme_bw()
+## violin plot
+p2 <- pp + geom_violin() + theme_bw()
+## combine plots
+p1 + p2 &
+  theme(legend.position="none") &
+  scale_x_discrete(limits=c("before","after")) &
+  labs(x = "", y = "Count")
+```
+
+
+## Analyses
+
+### Poisson models 
+
+We need to define the total survey area, so we can use it as an offset in our statistical models.
+
+```{r glm_1}
+## total survey area in m^2
+area <- 3.75
+```
+
+Here's the **JAGS** code for fitting a Poisson distribution to the data.
+
+```{r pois_fit_jags, message=FALSE, cache=TRUE}
+## define Poisson model in JAGS
+cat("
+
+data {
+  N <- dim(stars_wide);
+}
+
+model {
+  ## PRIORS
+  ln_lambda_bef ~ dnorm(0,0.01);
+  ln_lambda_aft ~ dnorm(0,0.01);
+  ## DERIVED PARAMS
+  lambda_bef <- exp(ln_lambda_bef);
+  lambda_aft <- exp(ln_lambda_aft);
+  ## LIKELIHOOD
+  for(i in 1:N[1]) {
+    stars_wide[i,1] ~ dpois(lambda_aft * area);
+    stars_wide[i,2] ~ dpois(lambda_bef * area);
+  }
+}
+
+", file="poisson_glm.txt") ## end model description
+
+## data to pass to JAGS
+dat_jags <- c("stars_wide", "area") 
+## model params for JAGS to return
+par_jags <- c("lambda_bef","lambda_aft")
+## MCMC control params
+mcmc_chains <- 4
+mcmc_length <- 2e4
+mcmc_burn <- 1e4
+mcmc_thin <- 20
+## total number of MCMC samples
+mcmc_samp <- (mcmc_length-mcmc_burn)*mcmc_chains/mcmc_thin
+## list of model info for JAGS
+mod_jags <- list(data = dat_jags,
+                 model.file = "poisson_glm.txt",
+                 parameters.to.save = par_jags,
+                 n.chains = as.integer(mcmc_chains),
+                 n.iter = as.integer(mcmc_length),
+                 n.burnin = as.integer(mcmc_burn),
+                 n.thin = as.integer(mcmc_thin))
+## fit model
+po_fit_jags <- do.call(jags.parallel, mod_jags)
+```
+
+### Examine parameter estimates
+
+The first thing we can do is examine a summary table of the posterior samples.
+
+```{r print_pois_fit_jags}
+print(po_fit_jags)
+```
+
+Visual summaries of the results can also be useful. Here are histograms of the posterior samples (left) and a summary of the median and 95% credible interval of the posterior samples (right).
+
+```{r plot_pois_fit_jags, fig.height=5, fig.width=8, message=FALSE}
+## gather posteriors samples
+pdat <- data.frame(Time = rep(c("before","after"), ea=mcmc_samp),
+                   samples = c(po_fit_jags$BUGSoutput$sims.list$lambda_bef,
+                               po_fit_jags$BUGSoutput$sims.list$lambda_aft))
+## summary of posteriors
+pdat2 <- pdat %>%
+  group_by(Time) %>%
+  summarize(lo = quantile(samples, 0.025),
+            med = quantile(samples, 0.5),
+            hi = quantile(samples, 0.975))
+## histogram of posteriors
+p1 <- ggplot(pdat, aes(samples, fill = Time)) +
+  theme_bw() +
+  geom_histogram(bins = 100) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  labs(x = expression(Density~(m^-2)), y = "Count")
+p2 <- ggplot(pdat2, aes(x=Time, y=med, color=Time)) +
+  theme_bw() +
+  geom_point(aes(size=1.5)) +
+  geom_errorbar(aes(ymin=lo, ymax=hi), width=0) +
+  scale_x_discrete(limits=c("before","after")) +
+  xlab("") +
+  ylab(expression(Density~(m^-2))) +
+  theme(legend.position="none")
+p1 + p2
+```
+
+### Negative binomial models
+
+Here is the **JAGS** code for fitting a negative binomial model to the data.
+
+```{r nb_fit_jags, message=FALSE, cache=TRUE}
+## define negative binomial model in JAGS
+cat("
+
+data {
+  N <- dim(stars_wide);
+}
+
+model {
+  ## PRIORS
+  r_bef ~ dnorm(0,0.01) T(0,);
+  r_aft ~ dnorm(0,0.01) T(0,);
+  lambda_bef ~ dnorm(0,0.1) T(0,);
+  lambda_aft ~ dnorm(0,0.1) T(0,);
+  ## DERIVED PARAMS
+  mu_bef <- lambda_bef * area; 
+  mu_aft <- lambda_aft * area; 
+  p_aft <- r_aft / (r_aft + mu_aft);
+  p_bef <- r_bef / (r_bef + mu_bef);
+  mean_bef <- r_bef * (1 - p_bef) / p_bef;
+  mean_aft <- r_aft * (1 - p_aft) / p_aft;
+  var_bef <- mean_bef / p_bef;
+  var_aft <- mean_aft / p_aft;
+  ## LIKELIHOOD
+  for(i in 1:N[1]) {
+    stars_wide[i,1] ~ dnegbin(p_aft, r_aft);
+    stars_wide[i,2] ~ dnegbin(p_bef, r_bef);
+  }
+}
+
+", file="negbin_glm.txt") ## end model description
+
+## update model params for JAGS to return
+par_jags <- c("lambda_bef","mean_bef","var_bef","lambda_aft","mean_aft","var_aft")
+
+## update list of model info for JAGS
+mod_jags$model.file <-"negbin_glm.txt"
+mod_jags$parameters.to.save <- par_jags
+
+## fit model
+nb_fit_jags <- do.call(jags.parallel, mod_jags)
+```
+
+### Examine parameter estimates
+
+Again we can examine a summary table of the parameter estimates. Notice that in this case, we also have estimates for mean and variance of the density of stars per 3.75 m^2^.
+
+```{r}
+print(nb_fit_jags)
+```
+
+This time I use a frequency plot instead of a histogram because the overlap in the distributions makes them hard to discern otherwise.
+
+```{r plot_nb_fit_jags, fig.height=5, fig.width=8, message=FALSE}
+## gather posteriors samples
+pdat <- data.frame(Time = rep(c("before","after"), ea=mcmc_samp),
+                   samples = c(nb_fit_jags$BUGSoutput$sims.list$lambda_bef,
+                               nb_fit_jags$BUGSoutput$sims.list$lambda_aft))
+## summary of posteriors
+pdat2 <- pdat %>%
+  group_by(Time) %>%
+  summarize(lo = quantile(samples, 0.025),
+            med = quantile(samples, 0.5),
+            hi = quantile(samples, 0.975))
+## trim away big values for histogram
+pdat <- pdat %>%
+  filter(samples <= 2)
+## histogram of posteriors
+p1 <- ggplot(pdat, aes(samples, color = Time)) +
+  theme_bw() +
+  geom_freqpoly(bins = 50) +
+  guides(color = guide_legend(reverse=TRUE)) +
+  labs(x = expression(Density~(m^-2)), y = "Count")
+p2 <- ggplot(pdat2, aes(x=Time, y=med, color=Time)) +
+  theme_bw() +
+  geom_point(aes(size=1.5)) +
+  geom_errorbar(aes(ymin=lo, ymax=hi), width=0) +
+  scale_x_discrete(limits=c("before","after")) +
+  labs(x = "", y = expression(Density~(m^-2))) +
+  theme(legend.position="none")
+p1 + p2
+```
+
+## Summary
+
+These results are clearly different from those from the original paper.
+
+
+***
+
+# Graphic design concepts
+
+In the world of graphic design, Edward Tufte has long been considered the authoritative source of do's and don'ts. He has a very popular book called [*The Visual Display of Quantitative Information*](https://www.edwardtufte.com/tufte/books_vdqi), which is worth perusing. I can also recommend Lukasz Piwek's wonderful online treatment of some Tufte-esque designs, [Tufte in R](http://motioninsocial.com/tufte/), which include options for making plots in both **base graphics** and **ggplot**. If you'd like to take a much deeper dive into plot design, I suggest you consider taking [Trevor Branch](https://fish.uw.edu/faculty/trevor-branch/)'s course [FISH 554: Beautiful Graphics in R](https://canvas.uw.edu/courses/1355148/assignments/syllabus).
+
+## Kinds of figures
+
+If you're interested in exploring the different kinds of plots/figures available for different data types, I highly recommend the [**R Graph Gallery**](https://www.r-graph-gallery.com/). You can click through the examples and see all of the code necessary to produce them, often via **base graphics** or **ggplot2**.
+
+## Exploratory vs expository figures
+
+Check out [this wonderful vignette](http://jtleek.com/ads2020/week-10.html#creating-expository-graphs) by Jeff Leek of transitioning from exploratory to expository figures.
+
+## Color palettes
+
+Color choice in figures is a combination of art and science. You'd like your figures to visually appeal to a wide audience, which includes people with visual disabilities. There are a variety of **R** packages that focus exclusively on color schemes. For example,
+
+* David Miller's [**Beyonce**](https://github.com/dill/beyonce)
+
+* Jake Lawlor's [**PNWColor**](https://github.com/jakelawlor/PNWColors)
+
+* Cianna Bedford-Petersen's [**2021 Inauguration**](https://github.com/ciannabp/inauguration)
+
+However, these are not necessarily "colorblind safe". If you want some colorblind safe palettes, then I suggest you consider the
+
+* [Viridis palettes](https://cran.r-project.org/web/packages/viridis/vignettes/intro-to-viridis.html)
+
+If you'd like to test what an image will look like to people with different forms of colorblindness, you can use the
+
+* [Color Blindness Simulator](https://www.color-blindness.com/coblis-color-blindness-simulator/)
+
+to upload an image and it will transform it into the appropriate hues.
+
+### Color selectors
+
+There are some nice online tools to help you choose color palettes. One of the most popular is 
+
+* [Colorbrewer](https://colorbrewer2.org/)
+
+which allows you to choose from *sequential* or *diverging* palettes, and even screen for those that are colorblind safe. Another good option is
+
+* [Color Palette Helper](https://gka.github.io/palettes)
+
+which allows you to specify beginning and end colors and the number of steps you'd like in between.
+
+#### Diverging palettes
+
+Diverging palettes should be used when there is a clear midpoint in the data, such that values above or below the midpoint take on different shades of a unique hue.
+
+#### Sequential palettes
+
+Sequential palettes should be used with one-sided data when there is a clear endpoint, often zero, such that values extend from some minimum to 
+
+## Pie charts
+
+Although the use of pie charts is very common, there have been numerous cognitive studies that suggest people actually have a hard time discerning how the area of the various slices relates to actual percentages. If you feel really tempted to use a pie chart, ask yourself whether or not the data would be better displayed in a table.
+
+### Waffleplots
+
+So-called *waffle plots* offer an alternative to pie charts. Waffle plots are square or rectangular representations of proportion data. Here's an example of some waffle plots created with Bob Rudis' [**waffle** package](https://github.com/hrbrmstr/waffle). The data are summaries of the sources, forms, and fates of greenhouse gas emissions.from the Intergovernmental Panel on Climate Change (IPCC).
+
+```{r ex_waffle_ghg, fig.height = 8, fig.width = 5}
+library(hrbrthemes)
+library(waffle)
+
+## data frame of GHG data
+ghg <- tibble(
+  parts = as.factor(c("CO2 - fossil fuels", "CO2 - land use", "CO2 - chemicals",
+                      "Methane", "Nitrous oxide", "Flourinated gases",
+                      "Electricity", "Food & land use", "Transportation",
+                      "Industry", "Buildings", "Other energy",
+                      "Increase in atmosphere", "Land-based sink",
+                      "Ocean-based sink")),
+  values = c(62, 11, 3, 16, 6, 2, 25, 24, 14, 21, 6, 10, 45, 32, 23),
+  category = c(rep("Greenhouse gas emissions", 6),
+               rep("Greenhouse gas sources", 6),
+               rep("Fate of CO2 emissions", 3))
+)
+
+## Greenhouse gas emissions
+ghg_1 <- filter(ghg, category == "Greenhouse gas emissions")
+ghg_p1 <- ggplot(ghg_1,
+                 aes(fill=parts, values=values)) +
+  geom_waffle(color = "white", size = 0.5, n_rows = 10) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  ggthemes::scale_fill_tableau(name=NULL,
+                               palette = "Miller Stone",
+                               type = "regular",
+                               direction = 1,
+                               breaks = ghg_1$parts) +
+  coord_equal() +
+  labs(
+    title = unique(ghg_1$category)
+  ) +
+  theme_ipsum_rc(grid="") +
+  theme_enhance_waffle()
+
+## Greenhouse gas sources
+ghg_2 <- filter(ghg, category == "Greenhouse gas sources")
+ghg_p2 <- ggplot(ghg_2,
+                 aes(fill=parts, values=values)) +
+  geom_waffle(color = "white", size = 0.5, n_rows = 10) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  ggthemes::scale_fill_tableau(name=NULL,
+                               palette = "Miller Stone",
+                               type = "regular",
+                               direction = 1,
+                               breaks = ghg_2$parts) +
+  coord_equal() +
+  labs(
+    title = unique(ghg_2$category)
+  ) +
+  theme_ipsum_rc(grid="") +
+  theme_enhance_waffle()
+
+## Fate of CO2 emissions
+ghg_3 <- filter(ghg, category == "Fate of CO2 emissions")
+ghg_p3 <- ggplot(ghg_3,
+                 aes(fill=parts, values=values)) +
+  geom_waffle(color = "white", size = 0.5, n_rows = 10) +
+  scale_x_discrete(expand=c(0,0)) +
+  scale_y_discrete(expand=c(0,0)) +
+  ggthemes::scale_fill_tableau(name = NULL,
+                               palette = "Color Blind",
+                               type = "regular",
+                               direction = -1,
+                               breaks = ghg_3$parts) +
+  coord_equal() +
+  labs(
+    title = unique(ghg_3$category)
+  ) +
+  theme_ipsum_rc(grid="") +
+  theme_enhance_waffle()
+
+## stick the plots together
+iron(ghg_p1, ghg_p2, ghg_p3)
+```
+
+
