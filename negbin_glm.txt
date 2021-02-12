@@ -1,0 +1,28 @@
+
+
+data {
+  N <- dim(stars_wide);
+}
+
+model {
+  ## PRIORS
+  r_bef ~ dnorm(0,0.01) T(0,);
+  r_aft ~ dnorm(0,0.01) T(0,);
+  lambda_bef ~ dnorm(0,0.1) T(0,);
+  lambda_aft ~ dnorm(0,0.1) T(0,);
+  ## DERIVED PARAMS
+  mu_bef <- lambda_bef * area; 
+  mu_aft <- lambda_aft * area; 
+  p_aft <- r_aft / (r_aft + mu_aft);
+  p_bef <- r_bef / (r_bef + mu_bef);
+  mean_bef <- r_bef * (1 - p_bef) / p_bef;
+  mean_aft <- r_aft * (1 - p_aft) / p_aft;
+  var_bef <- mean_bef / p_bef;
+  var_aft <- mean_aft / p_aft;
+  ## LIKELIHOOD
+  for(i in 1:N[1]) {
+    stars_wide[i,1] ~ dnegbin(p_aft, r_aft);
+    stars_wide[i,2] ~ dnegbin(p_bef, r_bef);
+  }
+}
+

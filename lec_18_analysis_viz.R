@@ -38,16 +38,16 @@ library(R2jags)
 
 ## ---- get_author_data----------------------------------------------------------------------
 ## data directory
-data_dir <- here::here("lectures", "week_06", "data")
+data_dir <- here::here("data")
 ## original data file
 orig_data <- file.path(data_dir, "Schultz_data_ver2.xlsx")
 ## worksheets in notebook
 sht_names <- excel_sheets(orig_data)
 ## convert worksheets to csv
-if(length(list.files(data_dir, "csv")) == 0) {
+if(length(list.files(data_dir, "csv")) == 1) { #the "one" means that only my previous data is there.
   for(i in sht_names) {
     orig_data %>% read_xlsx(sheet = i) %>%
-      write_csv(file = file.path(data_dir, i))
+      write_csv(file.path(data_dir, i))
   }
 }
 
@@ -245,6 +245,8 @@ p1 + p2
 ## ----ex_waffle_ghg, fig.height = 8, fig.width = 5------------------------------------------
 library(hrbrthemes)
 library(waffle)
+#hrbrthemes::import_roboto_condensed() 
+
 
 ## data frame of GHG data
 ghg <- tibble(
@@ -260,6 +262,8 @@ ghg <- tibble(
                rep("Fate of CO2 emissions", 3))
 )
 
+
+# remotes::install_github("hrbrmstr/waffle")
 ## Greenhouse gas emissions
 ghg_1 <- filter(ghg, category == "Greenhouse gas emissions")
 ghg_p1 <- ggplot(ghg_1,
@@ -278,6 +282,7 @@ ghg_p1 <- ggplot(ghg_1,
   ) +
   theme_ipsum_rc(grid="") +
   theme_enhance_waffle()
+
 
 ## Greenhouse gas sources
 ghg_2 <- filter(ghg, category == "Greenhouse gas sources")

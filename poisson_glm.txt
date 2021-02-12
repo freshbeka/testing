@@ -1,0 +1,20 @@
+
+
+data {
+  N <- dim(stars_wide);
+}
+
+model {
+  ## PRIORS
+  ln_lambda_bef ~ dnorm(0,0.01);
+  ln_lambda_aft ~ dnorm(0,0.01);
+  ## DERIVED PARAMS
+  lambda_bef <- exp(ln_lambda_bef);
+  lambda_aft <- exp(ln_lambda_aft);
+  ## LIKELIHOOD
+  for(i in 1:N[1]) {
+    stars_wide[i,1] ~ dpois(lambda_aft * area);
+    stars_wide[i,2] ~ dpois(lambda_bef * area);
+  }
+}
+
